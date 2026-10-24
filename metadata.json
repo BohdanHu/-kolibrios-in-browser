@@ -1,0 +1,6 @@
+{
+  "name": "KolibriOS Web x86 Emulator",
+  "description": "Run KolibriOS in your browser with v86 WebAssembly x86 emulator, featuring persistent IndexedDB virtual disk storage, manual state saving, and cold boot controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

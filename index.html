@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KolibriOS Web x86 Emulator</title>
+    <meta name="description" content="Run KolibriOS in your browser with v86 WebAssembly x86 emulator, featuring persistent IndexedDB virtual disk storage, manual state saving, and cold boot controls." />
+    <meta property="og:title" content="KolibriOS Web x86 Emulator" />
+    <meta property="og:description" content="Run KolibriOS in your browser with v86 WebAssembly x86 emulator, featuring persistent IndexedDB virtual disk storage, manual state saving, and cold boot controls." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <!-- v86 x86-to-WebAssembly emulator from official CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/v86@latest/build/libv86.js"></script>
+    <script>
+      // Ensure both V86 and V86Starter constructor aliases are defined
+      if (typeof window !== "undefined") {
+        if (window.V86 && !window.V86Starter) {
+          window.V86Starter = window.V86;
+        } else if (window.V86Starter && !window.V86) {
+          window.V86 = window.V86Starter;
+        }
+      }
+    </script>
+  </head>
+  <body class="bg-zinc-950 text-zinc-100 min-h-screen antialiased select-none">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

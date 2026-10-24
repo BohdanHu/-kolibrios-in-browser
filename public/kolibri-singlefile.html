@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KolibriOS in Browser (v86 + IndexedDB)</title>
+  <script src="https://cdn.jsdelivr.net/npm/v86@latest/build/libv86.js"></script>
+  <style>
+    :root {
+      --bg: #09090b;
+      --card-bg: #18181b;
+      --card-border: #27272a;
+      --text: #f4f4f5;
+      --text-muted: #a1a1aa;
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --danger: #e11d48;
+      --danger-hover: #be123c;
+      --success: #10b981;
+      --amber: #f59e0b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+    }
+
+    header {
+      background-color: var(--card-bg);
+      border-bottom: 1px solid var(--card-border);
+      padding: 12px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-logo {
+      width: 34px;
+      height: 34px;
+      background: linear-gradient(135deg, #6366f1, #06b6d4);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: 14px;
+      color: white;
+    }
+
+    .brand h1 {
+      font-size: 16px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand p {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .badge {
+      font-size: 10px;
+      font-family: monospace;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #27272a;
+      color: #d4d4d8;
+    }
+
+    .status-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+    }
+
+    .pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      background: #27272a;
+      border: 1px solid #3f3f46;
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-muted);
+    }
+    .dot.running { background: var(--success); }
+    .dot.loading { background: var(--amber); }
+    .dot.error { background: var(--danger); }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    button {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s ease;
+    }
+
+    button:active {
+      transform: scale(0.97);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: var(--primary-hover);
+    }
+
+    .btn-danger {
+      background: #27272a;
+      color: #f43f5e;
+      border: 1px solid #3f3f46;
+    }
+    .btn-danger:hover:not(:disabled) {
+      background: rgba(225, 29, 72, 0.2);
+      border-color: var(--danger);
+    }
+
+    .btn-secondary {
+      background: #27272a;
+      color: var(--text);
+      border: 1px solid #3f3f46;
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background: #3f3f46;
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .screen-card {
+      width: 100%;
+      max-width: 960px;
+      background: #18181b;
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .card-topbar {
+      background: #141416;
+      border-bottom: 1px solid var(--card-border);
+      padding: 8px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    #screen_container {
+      background: #000;
+      width: 100%;
+      min-height: 480px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      cursor: crosshair;
+    }
+
+    #screen_container canvas {
+      max-width: 100%;
+      height: auto;
+      object-fit: contain;
+      image-rendering: pixelated;
+    }
+
+    .loading-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(9, 9, 11, 0.88);
+      backdrop-filter: blur(4px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      z-index: 10;
+      text-align: center;
+      padding: 20px;
+    }
+
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(255, 255, 255, 0.1);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    footer.info-bar {
+      background: #141416;
+      border-top: 1px solid var(--card-border);
+      padding: 8px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .mouse-chip {
+      position: absolute;
+      bottom: 12px;
+      background: rgba(24, 24, 27, 0.9);
+      border: 1px solid #3f3f46;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      font-size: 11px;
+      color: var(--text);
+      pointer-events: none;
+    }
+
+    .toast {
+      padding: 4px 12px;
+      background: #064e3b;
+      border: 1px solid #10b981;
+      color: #6ee7b7;
+      border-radius: 9999px;
+      font-size: 11px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <div class="brand-logo">K</div>
+      <div>
+        <h1>KolibriOS <span class="badge">v86 WebAssembly</span></h1>
+        <p>100% Assembly OS • Persistent Virtual Storage via IndexedDB</p>
+      </div>
+    </div>
+
+    <div class="status-group">
+      <div class="pill">
+        <span id="status-dot" class="dot loading"></span>
+        <span id="status-text">Booting...</span>
+      </div>
+      <div class="pill" id="idb-pill">
+        <span>💾 IndexedDB:</span>
+        <strong id="idb-size">Checking...</strong>
+      </div>
+      <div id="save-toast" class="toast">State Saved to IndexedDB!</div>
+    </div>
+
+    <div class="actions">
+      <button id="save-btn" class="btn-primary" title="Save current machine and disk state to browser IndexedDB">
+        💾 Save to IndexedDB
+      </button>
+      <button id="reset-btn" class="btn-danger" title="Clear IndexedDB storage and cold boot from ISO">
+        🔄 Reset / Cold Boot
+      </button>
+      <button id="fullscreen-btn" class="btn-secondary">
+        ⛶ Fullscreen
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <div class="screen-card">
+      <div class="card-topbar">
+        <span>KolibriOS Desktop (VESA Graphics)</span>
+        <span id="boot-info">Boot source: ISO LiveCD</span>
+        <button id="mouse-lock-btn" class="btn-secondary" style="padding: 2px 8px; font-size: 11px;">
+          Capture Mouse
+        </button>
+      </div>
+
+      <div id="screen_container">
+        <div style="white-space: pre; font: 14px monospace; line-height: 14px; display: none;"></div>
+        <canvas style="display: none;"></canvas>
+
+        <div id="loading-overlay" class="loading-overlay">
+          <div class="spinner"></div>
+          <h3 id="loading-title">Loading KolibriOS...</h3>
+          <p id="loading-desc" style="font-size: 12px; color: #a1a1aa; max-width: 320px;">
+            Initializing v86 WebAssembly runtime and checking IndexedDB storage...
+          </p>
+        </div>
+
+        <div id="mouse-chip" class="mouse-chip">
+          Click screen to capture mouse • Press ESC to release
+        </div>
+      </div>
+
+      <footer class="info-bar">
+        <span>Virtual HDD: 32MB IDE (/hd0/)</span>
+        <span>Auto-save enabled (every 60s & on tab close)</span>
+        <span id="last-saved-info">Last saved: Never</span>
+      </footer>
+    </div>
+  </main>
+
+  <script>
+    // IndexedDB storage logic
+    const DB_NAME = 'kolibri_v86_db';
+    const DB_VERSION = 1;
+    const STORE_NAME = 'snapshots';
+    const KEY_SESSION = 'active_session';
+
+    let emulator = null;
+    let isSaving = false;
+
+    function openDB() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function loadSnapshot() {
+      try {
+        const db = await openDB();
+        return new Promise((resolve) => {
+          const tx = db.transaction([STORE_NAME], 'readonly');
+          const store = tx.objectStore(STORE_NAME);
+          const req = store.get(KEY_SESSION);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => resolve(null);
+        });
+      } catch (e) {
+        console.warn('IDB load error:', e);
+        return null;
+      }
+    }
+
+    async function saveSnapshot(buffer) {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_NAME], 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const record = {
+          id: KEY_SESSION,
+          state: buffer,
+          timestamp: Date.now(),
+          sizeBytes: buffer.byteLength
+        };
+        const req = store.put(record);
+        req.onsuccess = () => resolve(record);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function clearStorage() {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_NAME], 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.delete(KEY_SESSION);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    function formatBytes(bytes) {
+      if (!bytes || bytes <= 0) return '0 B';
+      const units = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(1024));
+      return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i];
+    }
+
+    function showToast(text) {
+      const toast = document.getElementById('save-toast');
+      toast.textContent = text;
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 3500);
+    }
+
+    async function initEmulator(useSaved) {
+      const overlay = document.getElementById('loading-overlay');
+      const statusDot = document.getElementById('status-dot');
+      const statusText = document.getElementById('status-text');
+      const bootInfo = document.getElementById('boot-info');
+      const idbSize = document.getElementById('idb-size');
+      const lastSavedInfo = document.getElementById('last-saved-info');
+
+      overlay.style.display = 'flex';
+      statusDot.className = 'dot loading';
+      statusText.textContent = useSaved ? 'Restoring state...' : 'Booting ISO...';
+
+      if (emulator) {
+        try { emulator.destroy(); } catch (e) {}
+        emulator = null;
+      }
+
+      const V86Engine = window.V86 || window.V86Starter;
+      if (!V86Engine) {
+        alert('v86 library failed to load from CDN. Check connection.');
+        return;
+      }
+
+      let savedBuffer = null;
+      if (useSaved) {
+        const snap = await loadSnapshot();
+        if (snap && snap.state) {
+          savedBuffer = snap.state;
+          bootInfo.textContent = 'Boot source: Restored from IndexedDB';
+          idbSize.textContent = formatBytes(snap.sizeBytes);
+          lastSavedInfo.textContent = 'Last saved: ' + new Date(snap.timestamp).toLocaleTimeString();
+        }
+      }
+
+      const options = {
+        wasm_path: 'https://cdn.jsdelivr.net/npm/v86@latest/build/v86.wasm',
+        memory_size: 128 * 1024 * 1024,
+        vga_memory_size: 8 * 1024 * 1024,
+        screen_container: document.getElementById('screen_container'),
+        bios: {
+          url: 'https://cdn.jsdelivr.net/npm/v86@latest/bios/seabios.bin',
+        },
+        vga_bios: {
+          url: 'https://cdn.jsdelivr.net/npm/v86@latest/bios/vgabios.bin',
+        },
+        cdrom: {
+          url: '/kolibri.iso',
+        },
+        hda: {
+          size: 32 * 1024 * 1024, // 32MB virtual disk for user files
+        },
+        autostart: true,
+      };
+
+      if (savedBuffer) {
+        options.initial_state = { buffer: savedBuffer };
+      }
+
+      emulator = new V86Engine(options);
+
+      emulator.add_listener('emulator-ready', () => {
+        overlay.style.display = 'none';
+        statusDot.className = 'dot running';
+        statusText.textContent = 'Running';
+      });
+
+      emulator.add_listener('download-error', (err) => {
+        alert('Error downloading media: ' + (err?.url || 'ISO'));
+      });
+    }
+
+    async function handleSave(isAuto) {
+      if (!emulator || isSaving) return;
+      isSaving = true;
+      const saveBtn = document.getElementById('save-btn');
+      saveBtn.textContent = '⏳ Saving...';
+      saveBtn.disabled = true;
+
+      try {
+        const buffer = await emulator.save_state();
+        const record = await saveSnapshot(buffer);
+        document.getElementById('idb-size').textContent = formatBytes(record.sizeBytes);
+        document.getElementById('last-saved-info').textContent = 'Last saved: ' + new Date(record.timestamp).toLocaleTimeString();
+        showToast(isAuto ? 'Auto-saved to IndexedDB!' : 'State & Disk Saved to IndexedDB!');
+      } catch (e) {
+        alert('Save error: ' + e.message);
+      } finally {
+        isSaving = false;
+        saveBtn.textContent = '💾 Save to IndexedDB';
+        saveBtn.disabled = false;
+      }
+    }
+
+    // UI event bindings
+    document.getElementById('save-btn').onclick = () => handleSave(false);
+
+    document.getElementById('reset-btn').onclick = async () => {
+      if (confirm('Clear local IndexedDB storage and cold boot KolibriOS from ISO?')) {
+        await clearStorage();
+        document.getElementById('idb-size').textContent = '0 B';
+        document.getElementById('last-saved-info').textContent = 'Last saved: Never';
+        initEmulator(false);
+      }
+    };
+
+    document.getElementById('fullscreen-btn').onclick = () => {
+      const container = document.getElementById('screen_container');
+      if (!document.fullscreenElement) {
+        container.requestFullscreen().catch(console.warn);
+      } else {
+        document.exitFullscreen().catch(console.warn);
+      }
+    };
+
+    document.getElementById('mouse-lock-btn').onclick = () => {
+      if (emulator) emulator.lock_mouse();
+    };
+
+    document.getElementById('screen_container').onclick = () => {
+      if (emulator) emulator.lock_mouse();
+    };
+
+    // Auto-save every 60 seconds
+    setInterval(() => {
+      if (emulator) handleSave(true);
+    }, 60000);
+
+    // Save before unload
+    window.addEventListener('beforeunload', () => {
+      if (emulator) {
+        emulator.save_state().then(buf => saveSnapshot(buf));
+      }
+    });
+
+    // Start on load
+    window.onload = async () => {
+      const existing = await loadSnapshot();
+      if (existing) {
+        document.getElementById('idb-size').textContent = formatBytes(existing.sizeBytes);
+        initEmulator(true);
+      } else {
+        document.getElementById('idb-size').textContent = 'Empty';
+        initEmulator(false);
+      }
+    };
+  </script>
+</body>
+</html>
