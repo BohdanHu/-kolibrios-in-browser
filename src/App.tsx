@@ -66,7 +66,8 @@ export default function App() {
 
   // Boot configuration & preferences
   const [bootSource, setBootSource] = useState<'restored_state' | 'iso_livecd' | 'custom_url'>('iso_livecd');
-  const [isoUrl, setIsoUrl] = useState('/kolibri.iso');
+  const [isoUrl, setIsoUrl] = useState('/kolibri.img');
+  const [isDownloadingOffline, setIsDownloadingOffline] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
@@ -81,8 +82,10 @@ export default function App() {
         setAutoSaveEnabled(prefs.autoSaveEnabled);
         setScreenScale(prefs.displayScale);
         setSoundEnabled(prefs.soundEnabled);
-        if (prefs.customIsoUrl) {
+        if (prefs.customIsoUrl && prefs.customIsoUrl !== '/kolibri.iso') {
           setIsoUrl(prefs.customIsoUrl);
+        } else {
+          setIsoUrl('/kolibri.img');
         }
 
         const stats = await getStorageStats();
@@ -184,17 +187,17 @@ export default function App() {
     }
 
     // Ensure v86 is available
-    const V86 = window.V86 || window.V86Starter;
+    const V86 = (window as any).V86 || (window as any).V86Starter || (globalThis as any).V86;
     if (!V86) {
       setStatus('error');
-      setErrorMessage('v86 WebAssembly emulator library failed to load from CDN. Please check your network connection.');
+      setErrorMessage('v86 WebAssembly emulator library failed to load. Please refresh the page.');
       return;
     }
 
-    // Clear previous screen elements in container except canvas and div
+    // Clear previous screen elements in container
     containerRef.current.innerHTML = `
-      <div style="white-space: pre; font: 14px monospace; line-height: 14px; display: none;"></div>
-      <canvas style="display: none;"></canvas>
+      <div style="white-space: pre; font: 14px monospace; line-height: 14px;"></div>
+      <canvas></canvas>
     `;
 
     try {
@@ -210,50 +213,77 @@ export default function App() {
           setSavedSizeBytes(record.sizeBytes);
           setLastSavedTime(record.timestamp);
         } else {
-          console.warn('Saved session not found in IndexedDB, falling back to clean ISO boot.');
+          console.warn('Saved session not found in IndexedDB, falling back to clean boot.');
           restoreFromSaved = false;
         }
       }
 
       if (!restoreFromSaved) {
         setStatus('loading_iso');
-        setStatusMessage('Mounting KolibriOS LiveCD ISO and allocating virtual drive...');
-        setBootSource(isoUrl === '/kolibri.iso' ? 'iso_livecd' : 'custom_url');
+        setStatusMessage('Loading KolibriOS system files...');
+        setBootSource(isoUrl === '/kolibri.img' ? 'iso_livecd' : 'custom_url');
       }
 
-      // Configure v86 options
-      // Seabios and Vgabios from official jsDelivr CDN
+      // Preload binaries into memory ArrayBuffers to guarantee instant zero-range-abort startup
+      const [wasmRes, biosRes, vgaBiosRes, mediaRes] = await Promise.all([
+        fetch('/v86.wasm'),
+        fetch('/seabios.bin'),
+        fetch('/vgabios.bin'),
+        fetch(isoUrl),
+      ]);
+
+      if (!wasmRes.ok || !biosRes.ok || !vgaBiosRes.ok || !mediaRes.ok) {
+        throw new Error('Failed to load emulator core binaries or OS image.');
+      }
+
+      const [wasmBuf, biosBuf, vgaBiosBuf, mediaBuf] = await Promise.all([
+        wasmRes.arrayBuffer(),
+        biosRes.arrayBuffer(),
+        vgaBiosRes.arrayBuffer(),
+        mediaRes.arrayBuffer(),
+      ]);
+
+      const isFloppy = isoUrl.endsWith('.img') || isoUrl.endsWith('.bin');
+      const virtualHda = new ArrayBuffer(16 * 1024 * 1024); // 16MB persistent virtual disk
+
+      // Configure v86 options with 100% in-memory buffers
       const options: any = {
-        wasm_path: 'https://cdn.jsdelivr.net/npm/v86@latest/build/v86.wasm',
-        memory_size: 128 * 1024 * 1024, // 128MB RAM
+        wasm_fn: async (param: any) => {
+          const { instance } = await WebAssembly.instantiate(wasmBuf, param);
+          return instance.exports;
+        },
+        wasm_path: '/v86.wasm',
+        memory_size: 64 * 1024 * 1024, // 64MB RAM
         vga_memory_size: 8 * 1024 * 1024,
         screen_container: containerRef.current,
         bios: {
-          url: 'https://cdn.jsdelivr.net/npm/v86@latest/bios/seabios.bin',
+          buffer: biosBuf,
         },
         vga_bios: {
-          url: 'https://cdn.jsdelivr.net/npm/v86@latest/bios/vgabios.bin',
-        },
-        // Virtual hard drive (32MB) for persistent filesystem in /hd0/
-        hda: {
-          size: 32 * 1024 * 1024,
+          buffer: vgaBiosBuf,
         },
         autostart: true,
       };
+
+      if (isFloppy) {
+        options.fda = {
+          buffer: mediaBuf,
+        };
+      } else {
+        options.cdrom = {
+          buffer: mediaBuf,
+        };
+      }
 
       // If restoring from state snapshot
       if (savedBuffer) {
         options.initial_state = {
           buffer: savedBuffer,
         };
-        // Also provide cdrom backing so subsequent sector reads succeed
-        options.cdrom = {
-          url: isoUrl,
-        };
       } else {
-        // Cold boot from KolibriOS ISO
-        options.cdrom = {
-          url: isoUrl,
+        // On clean boot, include virtual hda for file saves
+        options.hda = {
+          buffer: virtualHda,
         };
       }
 
@@ -261,19 +291,18 @@ export default function App() {
       emulatorRef.current = emulator;
 
       // Event listeners
-      emulator.add_listener('emulator-ready', () => {
+      const onStarted = () => {
         setStatus('running');
         setStatusMessage('KolibriOS is running');
         setIdbConnected(true);
-      });
+      };
+
+      emulator.add_listener('emulator-ready', onStarted);
+      emulator.add_listener('emulator-started', onStarted);
+      emulator.add_listener('screen-set-size', onStarted);
 
       emulator.add_listener('emulator-stopped', () => {
         setStatus((prev) => (prev === 'running' ? 'paused' : prev));
-      });
-
-      emulator.add_listener('emulator-started', () => {
-        setStatus('running');
-        setStatusMessage('KolibriOS is running');
       });
 
       // Handle download errors
@@ -281,7 +310,7 @@ export default function App() {
         console.error('Download error:', e);
         setStatus('error');
         setErrorMessage(
-          `Failed to load image from URL: ${e?.url || isoUrl}. Ensure the URL is accessible and allows cross-origin requests.`
+          `Failed to load media image: ${e?.url || isoUrl}.`
         );
       });
     } catch (err: any) {
@@ -460,6 +489,36 @@ export default function App() {
     e.target.value = '';
   };
 
+  // Download 100% Standalone Offline Single-File HTML
+  const handleDownloadOfflineHtml = async () => {
+    try {
+      setIsDownloadingOffline(true);
+      const res = await fetch('/kolibri-singlefile.html');
+      if (!res.ok) throw new Error('Offline file not found on server');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'kolibri-singlefile.html';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setSaveSuccessNotice('Downloaded standalone kolibri-singlefile.html!');
+      setTimeout(() => setSaveSuccessNotice(null), 4000);
+    } catch (err: any) {
+      console.warn('Direct fetch download error, using fallback link:', err);
+      const a = document.createElement('a');
+      a.href = '/kolibri-singlefile.html';
+      a.download = 'kolibri-singlefile.html';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } finally {
+      setIsDownloadingOffline(false);
+    }
+  };
+
   // Change scale mode
   const handleScaleChange = (scale: 'fit' | '1x' | '1.5x' | '2x') => {
     setScreenScale(scale);
@@ -566,8 +625,22 @@ export default function App() {
             )}
           </div>
 
-          {/* Action Buttons: Save & Reset/Cold Boot */}
+          {/* Action Buttons: Download Offline HTML, Save & Reset/Cold Boot */}
           <div className="flex items-center gap-2">
+            {/* Download Offline Single-File HTML Button */}
+            <button
+              onClick={handleDownloadOfflineHtml}
+              disabled={isDownloadingOffline}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-md shadow-emerald-950/40 active:scale-95 transition-all border border-emerald-500/30 cursor-pointer disabled:opacity-50"
+              title="Download 100% standalone single-file HTML (runs offline without internet from local disk or USB)"
+            >
+              <Download className={`w-3.5 h-3.5 ${isDownloadingOffline ? 'animate-bounce' : 'text-emerald-200'}`} />
+              <span>{isDownloadingOffline ? 'Downloading...' : 'Download Offline HTML'}</span>
+              <span className="hidden lg:inline text-[9px] font-mono font-medium px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-500/20">
+                100% Offline
+              </span>
+            </button>
+
             {/* Manual Save Button */}
             <button
               onClick={() => handleSaveState(false)}
@@ -771,7 +844,7 @@ export default function App() {
                   <div className="flex justify-between">
                     <span>Media:</span>
                     <span className="text-emerald-400 font-mono">
-                      {status === 'restoring_state' ? 'Snapshot.bin' : 'kolibri.iso'}
+                      {status === 'restoring_state' ? 'Snapshot.bin' : (isoUrl.split('/').pop() || 'kolibri.img')}
                     </span>
                   </div>
                 </div>
@@ -788,18 +861,28 @@ export default function App() {
                 <p className="text-sm text-zinc-400 max-w-md mb-5 leading-relaxed">
                   {errorMessage || 'Unable to boot the KolibriOS virtual machine.'}
                 </p>
-                <div className="flex gap-3">
+                <div className="flex flex-wrap gap-2.5 justify-center">
+                  <button
+                    onClick={() => {
+                      setIsoUrl('/kolibri.img');
+                      startEmulator(false);
+                    }}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold shadow-lg shadow-indigo-900/30 transition-all flex items-center gap-1.5"
+                  >
+                    <HardDrive className="w-3.5 h-3.5" />
+                    Boot with Floppy Image (1.44 MB)
+                  </button>
                   <button
                     onClick={() => startEmulator(false)}
-                    className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-semibold shadow-lg shadow-rose-900/30 transition-all"
+                    className="px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-medium border border-zinc-700 transition-all"
                   >
-                    Retry Cold Boot
+                    Retry ISO
                   </button>
                   <button
                     onClick={() => setShowConfigModal(true)}
-                    className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-medium border border-zinc-700 transition-all"
+                    className="px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-medium border border-zinc-700 transition-all"
                   >
-                    Configure Image URL
+                    Configure URL
                   </button>
                 </div>
               </div>
@@ -878,7 +961,7 @@ export default function App() {
         </div>
 
         {/* Quick Tips / KolibriOS Feature highlights */}
-        <div className="w-full max-w-5xl mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+        <div className="w-full max-w-5xl mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
           <div className="p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80 flex items-start gap-2.5">
             <div className="p-2 rounded bg-indigo-950/50 text-indigo-400 shrink-0">
               <Database className="w-4 h-4" />
@@ -891,6 +974,31 @@ export default function App() {
             </div>
           </div>
 
+          <div className="p-3 rounded-lg bg-emerald-950/20 border border-emerald-600/30 flex items-start gap-2.5">
+            <div className="p-2 rounded bg-emerald-950/60 text-emerald-400 shrink-0">
+              <Download className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-0.5">
+                <h4 className="font-semibold text-emerald-300">100% Offline File</h4>
+                <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-950 text-emerald-400 border border-emerald-500/30">
+                  USB-Ready
+                </span>
+              </div>
+              <p className="text-zinc-400 text-[11px] leading-relaxed mb-2">
+                All engine files, WebAssembly, BIOS, and OS floppy image embedded. Zero network calls.
+              </p>
+              <button
+                onClick={handleDownloadOfflineHtml}
+                disabled={isDownloadingOffline}
+                className="text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 underline underline-offset-2 cursor-pointer"
+              >
+                <span>Download HTML (5 MB)</span>
+                <span>→</span>
+              </button>
+            </div>
+          </div>
+
           <div className="p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80 flex items-start gap-2.5">
             <div className="p-2 rounded bg-sky-950/50 text-sky-400 shrink-0">
               <MousePointer className="w-4 h-4" />
@@ -898,13 +1006,13 @@ export default function App() {
             <div>
               <h4 className="font-semibold text-zinc-200 mb-0.5">Mouse & Keyboard</h4>
               <p className="text-zinc-400 text-[11px] leading-relaxed">
-                Click anywhere on the screen to capture mouse for smooth desktop navigation. Press <strong>ESC</strong> on your keyboard to release the pointer anytime.
+                Click anywhere on the screen to capture mouse for smooth desktop navigation. Press <strong>ESC</strong> on your keyboard to release pointer anytime.
               </p>
             </div>
           </div>
 
           <div className="p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80 flex items-start gap-2.5">
-            <div className="p-2 rounded bg-emerald-950/50 text-emerald-400 shrink-0">
+            <div className="p-2 rounded bg-indigo-950/50 text-indigo-400 shrink-0">
               <Sparkles className="w-4 h-4" />
             </div>
             <div>
@@ -1019,15 +1127,50 @@ export default function App() {
                 </div>
               </div>
 
+              {/* 100% Standalone Offline Single-File HTML */}
+              <div className="p-3.5 rounded-lg bg-emerald-950/30 border border-emerald-600/35 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="font-semibold text-emerald-300 flex items-center gap-1.5">
+                    <Download className="w-4 h-4 text-emerald-400" />
+                    <span>100% Standalone Offline Single-File</span>
+                  </div>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-900/60 text-emerald-300 border border-emerald-500/30 font-semibold">
+                    5.0 MB Single File
+                  </span>
+                </div>
+                <p className="text-zinc-300 text-[11px] leading-relaxed">
+                  Entire v86 WebAssembly emulator, BIOS, VGABIOS, and KolibriOS OS floppy inlined into one standalone HTML file. Zero network requests, runs from USB or offline local disk. Virtual disk saving via IndexedDB works completely offline!
+                </p>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    onClick={handleDownloadOfflineHtml}
+                    disabled={isDownloadingOffline}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-md shadow-emerald-950 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <Download className={`w-3.5 h-3.5 ${isDownloadingOffline ? 'animate-bounce' : ''}`} />
+                    <span>{isDownloadingOffline ? 'Downloading Single-File...' : 'Download Offline HTML'}</span>
+                  </button>
+                  <a
+                    href="/kolibri-singlefile.html"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium border border-zinc-700 transition-colors flex items-center gap-1"
+                    title="Open standalone offline single-file in new browser tab"
+                  >
+                    <span>Preview</span>
+                  </a>
+                </div>
+              </div>
+
               {/* Custom ISO URL setting */}
               <div className="space-y-2 pt-2 border-t border-zinc-800">
-                <h4 className="font-semibold text-zinc-200">Boot ISO Image URL</h4>
+                <h4 className="font-semibold text-zinc-200">Boot Disk / ISO Image</h4>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={isoUrl}
                     onChange={(e) => setIsoUrl(e.target.value)}
-                    placeholder="/kolibri.iso or https://..."
+                    placeholder="/kolibri.img or custom URL"
                     className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-200 font-mono focus:outline-none focus:border-indigo-500"
                   />
                   <button
@@ -1037,7 +1180,7 @@ export default function App() {
                         autoSaveIntervalSec: 60,
                         displayScale: screenScale,
                         soundEnabled,
-                        bootMedia: 'iso',
+                        bootMedia: 'img',
                         customIsoUrl: isoUrl,
                       });
                       setShowConfigModal(false);
@@ -1050,17 +1193,10 @@ export default function App() {
                 </div>
                 <div className="flex gap-2 text-[10px] text-zinc-400 pt-1">
                   <button
-                    onClick={() => setIsoUrl('/kolibri.iso')}
-                    className="hover:text-indigo-400 underline"
-                  >
-                    Preset: Official LiveCD ISO
-                  </button>
-                  <span>•</span>
-                  <button
                     onClick={() => setIsoUrl('/kolibri.img')}
                     className="hover:text-indigo-400 underline"
                   >
-                    Preset: Floppy Image (1.44MB)
+                    Preset: Official KolibriOS Image (1.44MB)
                   </button>
                 </div>
               </div>
@@ -1111,20 +1247,37 @@ export default function App() {
                 </ul>
               </div>
 
-              <div className="p-3 bg-zinc-950 rounded-lg border border-zinc-800 text-[11px]">
-                <span className="font-semibold text-indigo-400">Standalone Single-File HTML:</span>
-                <p className="text-zinc-400 mt-0.5">
-                  A self-contained HTML version is also accessible at{' '}
+              <div className="p-3 bg-zinc-950 rounded-lg border border-emerald-600/30 text-[11px] space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-emerald-300 flex items-center gap-1.5">
+                    <Download className="w-3.5 h-3.5 text-emerald-400" />
+                    100% Standalone Offline Single-File:
+                  </span>
+                  <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-950 text-emerald-400 border border-emerald-500/20">
+                    Zero-Network
+                  </span>
+                </div>
+                <p className="text-zinc-400 leading-relaxed">
+                  The entire operating system, v86 JIT emulator, WebAssembly runtime, and BIOS are embedded into <code>kolibri-singlefile.html</code>. You can copy it to a USB flash drive or offline laptop and boot instantly with full IndexedDB storage persistence.
+                </p>
+                <div className="pt-1 flex gap-2">
+                  <button
+                    onClick={handleDownloadOfflineHtml}
+                    disabled={isDownloadingOffline}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md font-semibold text-[11px] flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Download className="w-3 h-3" />
+                    <span>{isDownloadingOffline ? 'Downloading...' : 'Download Offline HTML'}</span>
+                  </button>
                   <a
                     href="/kolibri-singlefile.html"
                     target="_blank"
                     rel="noreferrer"
-                    className="text-sky-400 hover:underline"
+                    className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-md font-medium text-[11px] flex items-center gap-1 border border-zinc-700"
                   >
-                    /kolibri-singlefile.html
+                    <span>Open in Tab</span>
                   </a>
-                  . You can right-click and save it to run KolibriOS anywhere offline.
-                </p>
+                </div>
               </div>
             </div>
 
