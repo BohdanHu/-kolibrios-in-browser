@@ -287,7 +287,20 @@ export default function App() {
         };
       }
 
-      const emulator = new V86(options);
+      let emulator: any;
+      try {
+        emulator = new V86(options);
+      } catch (stateErr) {
+        if (savedBuffer) {
+          console.warn('[KolibriOS] Saved state snapshot incompatible or corrupted, clearing IndexedDB and falling back to clean boot...', stateErr);
+          await clearIndexedDBStorage();
+          setHasSavedState(false);
+          setSavedSizeBytes(0);
+          return startEmulator(false);
+        } else {
+          throw stateErr;
+        }
+      }
       emulatorRef.current = emulator;
 
       // Event listeners
