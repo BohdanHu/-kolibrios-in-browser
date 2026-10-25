@@ -4,90 +4,90 @@
 [![v86 Emulator](https://img.shields.io/badge/Emulator-v86-green.svg)](https://github.com/copy/v86)
 [![Status](https://img.shields.io/badge/Status-Production%20Ready-success.svg)]()
 
-современный веб-интерфейс для запуска **KolibriOS** (и других x86-совместимых операционных систем) прямо в браузере с помощью технологии WebAssembly (`v86`).
+A high-performance in-browser x86 PC emulator running **KolibriOS** (and other x86-compatible operating systems) entirely client-side using WebAssembly and the `v86` emulator engine.
 
 ---
 
-## 🚀 Что здесь сделано и для чего это нужно?
+## 🚀 What is this and what is it for?
 
-### 1. Что это за проект?
-Этот проект представляет собой полнофункциональный эмулятор x86-ПК на базе **v86**, полностью работающий на стороне клиента (в браузере). Он не требует установки дополнительного ПО, настройки виртуальных машин (VirtualBox, VMware) или наличия эмуляторов на компьютере. 
+### 1. Project Overview
+This project is a fully featured, client-side x86 virtualization environment running directly inside your web browser. No plugins, complex VM installations (like VirtualBox or VMware), or local hypervisors are required.
 
-В качестве основной операционной системы используется **KolibriOS** — легендарная сверхбыстрая 32-битная операционная система, написанная полностью на языке ассемблера (FASM). Она загружается за считанные секунды и поражает своей невероятной производительностью и компактностью.
+It boots **KolibriOS**—an extraordinarily fast, lightweight 32-bit preemptive multitasking operating system written entirely in FASM assembly language. KolibriOS boots in seconds and demonstrates remarkable performance and responsiveness directly in web browsers.
 
-### 2. Ключевые возможности и функционал
-* ⚡ **Запуск в один клик**: Загрузка KolibriOS в браузере через WebAssembly без плагинов.
-* 💾 **Персистентность (IndexedDB)**: Все изменения в файловой системе и состояние виртуальной машины автоматически или вручную сохраняются в IndexedDB браузера. При перезагрузке страницы ваша сессия восстанавливается.
-* 📥 **Экспорт и импорт состояния**: Возможность скачивать слепок состояния (`.bin`) на локальный диск и загружать его обратно, либо сбрасывать состояние к заводским настройкам (Cold Boot).
-* 🎛 **Гибкое управление экраном и мышью**:
-  * Масштабирование экрана (`Fit`, `1x`, `1.5x`, `2x`).
-  * Полноэкранный режим.
-  * Управление захватом мыши (Pointer Lock) для точной работы внутри ОС.
-  * Включение/выключение звука (PC Speaker / Sound Blaster).
-* ⚙️ **Расширенные настройки загрузки**:
-  * Выбор источника загрузки (Live CD образ `.img`, кастомный URL или сохраненная сессия).
-  * Настройка интервала автосохранения.
-  * Мониторинг производительности (счетчик выполненных инструкций процессора).
-* 📦 **Поддержка автономной работы (Offline)**: Приложение оптимизировано для работы в автономном режиме после первой загрузки ассетов v86 и образа ОС.
-
----
-
-## 🛠 Технологический стек
-
-* **Фронтенд**: React, TypeScript, Tailwind CSS, Lucide Icons.
-* **Эмулятор x86**: `v86` (WebAssembly / JS x86 virtualization).
-* **Хранение данных**: IndexedDB (для сохранения образов и состояний виртуального диска).
-* **Сборка и сервер**: Vite, Express (`server.ts`).
+### 2. Key Features & Capabilities
+* ⚡ **Instant In-Browser Boot**: Runs entirely client-side via WebAssembly (`v86`), leveraging modern browser performance.
+* 💾 **Persistent Storage (IndexedDB)**: Automatically saves virtual hard disk changes and machine state to browser IndexedDB storage so your work is never lost on refresh.
+* 📥 **State Export & Import**: Easily download machine state snapshots (`.bin`) to your local machine or restore them anytime, with options for clean cold boots.
+* 🎛 **Display & Mouse Controls**:
+  * Flexible screen scaling (`Fit`, `1x`, `1.5x`, `2x`).
+  * Fullscreen display mode.
+  * Mouse capture / Pointer Lock support for precise OS interaction.
+  * Audio toggle (PC Speaker / Sound Blaster emulation).
+* ⚙️ **Advanced Boot Options**:
+  * Switch between live CD images (`/kolibri.img`), custom ISO/img URLs, or restored states.
+  * Configurable auto-save intervals.
+  * Live instruction counter and system metrics monitoring.
+* 📦 **Offline Capable**: Fully self-contained assets ready for offline usage once cached.
 
 ---
 
-## 📂 Структура проекта
+## 🛠 Tech Stack
+
+* **Frontend**: React 18, TypeScript, Tailwind CSS, Lucide Icons.
+* **Emulator Engine**: `v86` (WebAssembly x86 virtualization).
+* **Persistence**: IndexedDB (client-side virtual disk and state storage).
+* **Build Tooling & Server**: Vite, Express (`server.ts`).
+
+---
+
+## 📂 Project Structure
 
 ```text
-├── .cache_assets/          # Кэшированные бинарные файлы v86 (BIOS, WASM)
+├── .cache_assets/          # Cached v86 binary assets (BIOS, WASM)
 ├── public/
-│   ├── kolibri.img         # Образ диска KolibriOS
-│   ├── kolibri-singlefile.html # Скрипт/шаблон для автономного запуска
-│   ├── libv86.js           # Библиотека v86
+│   ├── kolibri.img         # KolibriOS bootable floppy/disk image
+│   ├── kolibri-singlefile.html # Single-file standalone build template
+│   ├── libv86.js           # v86 client library
 │   ├── seabios.bin         # SeaBIOS ROM
-│   ├── v86.wasm            # WebAssembly ядро v86
+│   ├── v86.wasm            # v86 WebAssembly runtime core
 │   └── vgabios.bin         # VGA BIOS ROM
 ├── scripts/
-│   └── build-singlefile.js # Скрипт сборки в один HTML-файл
-├── server.ts               # Бэкенд на Express для разработки
+│   └── build-singlefile.js # Script to bundle into a single standalone HTML file
+├── server.ts               # Express development server
 ├── src/
-│   ├── App.tsx             # Главный интерфейс приложения и контроллер эмулятора
-│   ├── index.css           # Tailwind CSS стили
-│   ├── main.tsx            # Точка входа React
+│   ├── App.tsx             # Main React UI and emulator controller
+│   ├── index.css           # Tailwind CSS styling
+│   ├── main.tsx            # Application entry point
 │   ├── services/
-│   │   └── storage.ts      # Управление IndexedDB и настройками
+│   │   └── storage.ts      # IndexedDB persistence and preference management
 │   └── types/
-│       └── v86.d.ts        # TypeScript типы для v86
-└── package.json            # Зависимости и скрипты сборки
+│       └── v86.d.ts        # TypeScript definitions for v86
+└── package.json            # Dependencies and npm scripts
 ```
 
 ---
 
-## 🚀 Как запустить проект локально?
+## 🚀 Getting Started Locally
 
-1. **Установите зависимости**:
+1. **Install dependencies**:
    ```bash
    npm install
    ```
 
-2. **Запустите сервер разработки**:
+2. **Run the development server**:
    ```bash
    npm run dev
    ```
 
-3. **Соберите проект для продакшена**:
+3. **Build for production**:
    ```bash
    npm run build
    ```
 
 ---
 
-## 🎯 Для чего это применяется?
-* **Обучение и демонстрация**: Отличный способ показать возможности WebAssembly и архитектуры x86 без настройки тяжелого ПО.
-* **Ретро-энтузиазм**: Быстрый запуск легендарной KolibriOS для разработчиков, студентов и любителей ретро-вычислений.
-* **Песочница**: Тестирование легковесных ОС и эксперименты с виртуализацией в браузере.
+## 🎯 Use Cases
+* **Education & Demonstrations**: Showcase WebAssembly, low-level OS architecture, and x86 virtualization interactively in any modern browser.
+* **Retro Computing & Enthusiasts**: Instantly explore KolibriOS, test assembly applications, and enjoy lightning-fast legacy x86 environments without configuration hassle.
+* **Web-based Sandbox**: Safe, sandboxed operating system environment running entirely client-side.
