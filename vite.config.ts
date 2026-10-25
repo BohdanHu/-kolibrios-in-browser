@@ -5,7 +5,7 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    base: './',
+    base: '/-kolibrios-in-browser/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
