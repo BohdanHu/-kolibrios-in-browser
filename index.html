@@ -1,30 +1,768 @@
-<!doctype html>
-<html lang="en" class="dark">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>KolibriOS Web x86 Emulator</title>
-    <meta name="description" content="Run KolibriOS in your browser with v86 WebAssembly x86 emulator, featuring persistent IndexedDB virtual disk storage, manual state saving, and cold boot controls." />
-    <meta property="og:title" content="KolibriOS Web x86 Emulator" />
-    <meta property="og:description" content="Run KolibriOS in your browser with v86 WebAssembly x86 emulator, featuring persistent IndexedDB virtual disk storage, manual state saving, and cold boot controls." />
-    <meta property="og:type" content="website" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <!-- v86 x86-to-WebAssembly emulator (locally hosted to avoid cross-origin Script error) -->
-    <script src="/libv86.js"></script>
-    <script>
-      // Ensure both V86 and V86Starter constructor aliases are defined
-      if (typeof window !== "undefined") {
-        if (window.V86 && !window.V86Starter) {
-          window.V86Starter = window.V86;
-        } else if (window.V86Starter && !window.V86) {
-          window.V86 = window.V86Starter;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KolibriOS Web x86 Emulator (v86 + IndexedDB)</title>
+  <meta name="description" content="Run KolibriOS in your browser with v86 WebAssembly x86 emulator, featuring persistent IndexedDB virtual disk storage, manual state saving, and cold boot controls." />
+  <style>
+    :root {
+      --bg: #09090b;
+      --card-bg: #18181b;
+      --card-border: #27272a;
+      --card-header: #141416;
+      --text: #f4f4f5;
+      --text-muted: #a1a1aa;
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --emerald: #10b981;
+      --emerald-dark: #064e3b;
+      --emerald-light: #6ee7b7;
+      --danger: #e11d48;
+      --danger-hover: #be123c;
+      --amber: #f59e0b;
+      --sky: #0ea5e9;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+      -webkit-user-select: none;
+      overflow-x: hidden;
+    }
+
+    header {
+      background-color: var(--card-bg);
+      border-bottom: 1px solid var(--card-border);
+      padding: 10px 18px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 40;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-logo {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, #6366f1, #06b6d4, #10b981);
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: 14px;
+      color: white;
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+      flex-shrink: 0;
+    }
+
+    .brand-title {
+      font-size: 15px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-subtitle {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .badge-offline {
+      font-size: 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      padding: 2px 7px;
+      border-radius: 9999px;
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .status-group {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      background: #27272a;
+      border: 1px solid #3f3f46;
+      font-size: 11px;
+      font-weight: 500;
+      color: #e4e4e7;
+    }
+
+    .pill.idb-active {
+      background: rgba(99, 102, 241, 0.12);
+      border-color: rgba(99, 102, 241, 0.4);
+      color: #c7d2fe;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--text-muted);
+    }
+    .dot.running { background: var(--emerald); box-shadow: 0 0 8px var(--emerald); }
+    .dot.paused { background: var(--amber); }
+    .dot.loading { background: var(--sky); animation: pulse 1s infinite; }
+    .dot.error { background: var(--danger); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    button {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 13px;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+      font-family: inherit;
+    }
+
+    button:active {
+      transform: scale(0.97);
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+      box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: var(--primary-hover);
+    }
+
+    .btn-danger {
+      background: #27272a;
+      color: #fda4af;
+      border: 1px solid #4c1d24;
+    }
+    .btn-danger:hover:not(:disabled) {
+      background: rgba(225, 29, 72, 0.25);
+      border-color: var(--danger);
+      color: #fff;
+    }
+
+    .btn-secondary {
+      background: #27272a;
+      color: var(--text);
+      border: 1px solid #3f3f46;
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background: #3f3f46;
+      color: #fff;
+    }
+
+    .toast {
+      padding: 4px 12px;
+      background: var(--emerald-dark);
+      border: 1px solid var(--emerald);
+      color: var(--emerald-light);
+      border-radius: 9999px;
+      font-size: 11px;
+      display: none;
+      animation: fadeIn 0.2s ease-in-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+      max-width: 1100px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .screen-card {
+      width: 100%;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.65);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .screen-card.fullscreen {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      border-radius: 0;
+      border: none;
+      max-width: none;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    .card-topbar {
+      background: var(--card-header);
+      border-bottom: 1px solid var(--card-border);
+      padding: 7px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .card-topbar-left, .card-topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #screen_container {
+      background: #000;
+      width: 100%;
+      min-height: 480px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      cursor: crosshair;
+      overflow: hidden;
+    }
+
+    .fullscreen #screen_container {
+      flex: 1;
+      height: 100%;
+      min-height: 0;
+    }
+
+    #screen_container canvas {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+
+    #screen_container div {
+      white-space: pre;
+      font-family: monospace;
+      font-size: 14px;
+      line-height: 14px;
+      color: #fff;
+    }
+
+    .loading-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(9, 9, 11, 0.92);
+      backdrop-filter: blur(6px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      z-index: 10;
+      text-align: center;
+      padding: 24px;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid rgba(255, 255, 255, 0.12);
+      border-top-color: var(--sky);
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .mouse-chip {
+      position: absolute;
+      bottom: 12px;
+      background: rgba(24, 24, 27, 0.92);
+      border: 1px solid #3f3f46;
+      padding: 5px 14px;
+      border-radius: 9999px;
+      font-size: 11px;
+      color: var(--text);
+      pointer-events: none;
+      backdrop-filter: blur(4px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+
+    footer.info-bar {
+      background: var(--card-header);
+      border-top: 1px solid var(--card-border);
+      padding: 8px 14px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .scale-selector {
+      display: flex;
+      background: #27272a;
+      border-radius: 6px;
+      padding: 2px;
+      border: 1px solid #3f3f46;
+    }
+
+    .scale-btn {
+      padding: 2px 7px;
+      font-size: 10px;
+      background: transparent;
+      color: var(--text-muted);
+      border-radius: 4px;
+    }
+
+    .scale-btn.active {
+      background: #3f3f46;
+      color: #fff;
+    }
+
+    .info-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+      width: 100%;
+      margin-top: 16px;
+    }
+
+    .info-card {
+      background: rgba(24, 24, 27, 0.6);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 12px;
+    }
+
+    .info-icon {
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+
+    .info-title {
+      font-weight: 600;
+      color: #f4f4f5;
+      margin-bottom: 2px;
+    }
+
+    .info-desc {
+      color: var(--text-muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+  </style>
+
+  <!-- Load v86 emulator library locally -->
+  <script src="./libv86.js"></script>
+</head>
+<body>
+
+  <!-- Top App Bar -->
+  <header>
+    <div class="brand">
+      <div class="brand-logo">K</div>
+      <div>
+        <div class="brand-title">
+          KolibriOS
+          <span class="badge-offline">100% Static HTML / GitHub Pages Ready</span>
+        </div>
+        <div class="brand-subtitle">v86 x86 WASM • Zero Build Steps Required</div>
+      </div>
+    </div>
+
+    <div class="status-group">
+      <div class="pill">
+        <span id="status-dot" class="dot loading"></span>
+        <span id="status-text">Booting KolibriOS...</span>
+      </div>
+      <div class="pill idb-active" title="Browser IndexedDB persistent virtual drive">
+        <span>💾 IndexedDB:</span>
+        <strong id="idb-size">Checking...</strong>
+      </div>
+      <div id="save-toast" class="toast">State Saved to IndexedDB!</div>
+    </div>
+
+    <div class="actions">
+      <button id="save-btn" class="btn-primary">💾 Save State</button>
+      <button id="reset-btn" class="btn-danger">🔄 Cold Boot</button>
+      <button id="fullscreen-btn" class="btn-secondary">⛶ Fullscreen</button>
+    </div>
+  </header>
+
+  <!-- Main Viewport Area -->
+  <main>
+    <div id="emulator-card" class="screen-card">
+      <div class="card-topbar">
+        <div class="card-topbar-left">
+          <button id="pause-btn" class="btn-secondary" style="padding: 3px 8px; font-size: 11px;">⏸ Pause</button>
+          <button id="mouse-lock-btn" class="btn-secondary" style="padding: 3px 8px; font-size: 11px;">🖱 Capture Mouse</button>
+          <span style="font-size: 11px; color: #a1a1aa;">Source: ./kolibri.img</span>
+        </div>
+        <div class="card-topbar-right">
+          <div class="scale-selector">
+            <button class="scale-btn active" data-scale="fit">Fit</button>
+            <button class="scale-btn" data-scale="1x">1x</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="screen_container">
+        <div id="loading-overlay" class="loading-overlay">
+          <div class="spinner"></div>
+          <h3 style="font-size: 16px; font-weight: 700; color: #fff;">Launching KolibriOS...</h3>
+          <p id="loading-desc" style="font-size: 12px; color: #a1a1aa; max-width: 360px;">
+            Initializing v86 x86 WebAssembly environment...
+          </p>
+        </div>
+        <div id="mouse-chip" class="mouse-chip" style="display: none;">
+          Click screen to capture mouse • Press <strong>ESC</strong> to release
+        </div>
+      </div>
+
+      <footer class="info-bar">
+        <span>RAM: 128MB • VRAM: 8MB • Storage: IndexedDB + Floppy/IDE</span>
+        <span id="cycles-info">WASM Running</span>
+        <span id="last-saved-info">Last saved: Never</span>
+      </footer>
+    </div>
+
+    <div class="info-cards">
+      <div class="info-card">
+        <div class="info-icon">⚡</div>
+        <div>
+          <div class="info-title">Zero Build Process</div>
+          <div class="info-desc">
+            This is a pure static HTML page. No Node.js, no npm, no Vite, and no GitHub Actions build workflows needed. Just commit <code>index.html</code> and the asset files to your repository root!
+          </div>
+        </div>
+      </div>
+      <div class="info-card">
+        <div class="info-icon">💾</div>
+        <div>
+          <div class="info-title">IndexedDB Persistence</div>
+          <div class="info-desc">
+            Your virtual disk changes and emulator state are automatically saved in browser IndexedDB. Click <strong>Save State</strong> anytime.
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    (function() {
+      const DB_NAME = 'KolibriOS_v86_PureHTML';
+      const STORE_NAME = 'state_store';
+      const STATE_KEY = 'v86_snapshot';
+
+      let db = null;
+      let emulator = null;
+      let isRunning = false;
+
+      // DOM Elements
+      const statusDot = document.getElementById('status-dot');
+      const statusText = document.getElementById('status-text');
+      const idbSizeEl = document.getElementById('idb-size');
+      const loadingOverlay = document.getElementById('loading-overlay');
+      const loadingDesc = document.getElementById('loading-desc');
+      const saveToast = document.getElementById('save-toast');
+      const saveBtn = document.getElementById('save-btn');
+      const resetBtn = document.getElementById('reset-btn');
+      const pauseBtn = document.getElementById('pause-btn');
+      const mouseLockBtn = document.getElementById('mouse-lock-btn');
+      const fullscreenBtn = document.getElementById('fullscreen-btn');
+      const emulatorCard = document.getElementById('emulator-card');
+      const mouseChip = document.getElementById('mouse-chip');
+      const lastSavedInfo = document.getElementById('last-saved-info');
+
+      // Init IndexedDB
+      function initIndexedDB() {
+        return new Promise((resolve, reject) => {
+          const req = indexedDB.open(DB_NAME, 1);
+          req.onupgradeneeded = (e) => {
+            const database = e.target.result;
+            if (!database.objectStoreNames.contains(STORE_NAME)) {
+              database.createObjectStore(STORE_NAME);
+            }
+          };
+          req.onsuccess = (e) => {
+            db = e.target.result;
+            resolve(db);
+          };
+          req.onerror = (e) => reject(e.target.error);
+        });
+      }
+
+      function getSavedState() {
+        return new Promise((resolve) => {
+          if (!db) return resolve(null);
+          try {
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            const store = tx.objectStore(STORE_NAME);
+            const req = store.get(STATE_KEY);
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => resolve(null);
+          } catch {
+            resolve(null);
+          }
+        });
+      }
+
+      function saveStateToIDB(arrayBuffer) {
+        return new Promise((resolve, reject) => {
+          if (!db) return reject('No DB');
+          try {
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            const req = store.put(arrayBuffer, STATE_KEY);
+            req.onsuccess = () => {
+              const sizeMB = (arrayBuffer.byteLength / (1024 * 1024)).toFixed(2) + ' MB';
+              idbSizeEl.textContent = sizeMB;
+              lastSavedInfo.textContent = 'Last saved: ' + new Date().toLocaleTimeString();
+              resolve(true);
+            };
+            req.onerror = (e) => reject(e.target.error);
+          } catch (err) {
+            reject(err);
+          }
+        });
+      }
+
+      function clearIDB() {
+        return new Promise((resolve) => {
+          if (!db) return resolve();
+          try {
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            const req = store.clear();
+            req.onsuccess = () => resolve(true);
+            req.onerror = () => resolve(false);
+          } catch {
+            resolve(false);
+          }
+        });
+      }
+
+      async function updateStorageStats() {
+        const saved = await getSavedState();
+        if (saved && saved.byteLength) {
+          idbSizeEl.textContent = (saved.byteLength / (1024 * 1024)).toFixed(2) + ' MB';
+        } else {
+          idbSizeEl.textContent = 'Empty (0 MB)';
         }
       }
-    </script>
-  </head>
-  <body class="bg-zinc-950 text-zinc-100 min-h-screen antialiased select-none">
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
 
+      function showToast() {
+        saveToast.style.display = 'block';
+        setTimeout(() => {
+          saveToast.style.display = 'none';
+        }, 2500);
+      }
+
+      async function boot() {
+        try {
+          statusDot.className = 'dot loading';
+          statusText.textContent = 'Connecting to IndexedDB...';
+          await initIndexedDB();
+          await updateStorageStats();
+
+          const savedStateBuffer = await getSavedState();
+
+          statusText.textContent = 'Loading v86 Emulator...';
+          const V86 = window.V86 || window.V86Starter;
+          if (!V86) {
+            throw new Error('v86 library (libv86.js) failed to load.');
+          }
+
+          const container = document.getElementById('screen_container');
+
+          const v86Options = {
+            wasm_path: './v86.wasm',
+            memory_size: 128 * 1024 * 1024,
+            vram_size: 8 * 1024 * 1024,
+            screen_container: container,
+            bios: { url: './seabios.bin' },
+            vga_bios: { url: './vgabios.bin' },
+            autostart: true,
+          };
+
+          if (savedStateBuffer) {
+            loadingDesc.textContent = 'Restoring saved state from IndexedDB...';
+            v86Options.initial_state = { buffer: savedStateBuffer };
+          } else {
+            loadingDesc.textContent = 'Booting KolibriOS from floppy image...';
+            v86Options.fda = { url: './kolibri.img' };
+          }
+
+          emulator = new V86(v86Options);
+
+          emulator.add_listener('serial0-output', function(data) {
+            console.log('[Serial0]:', data);
+          });
+
+          emulator.add_listener('ready', function() {
+            statusDot.className = 'dot running';
+            statusText.textContent = 'Running (KolibriOS)';
+            loadingOverlay.style.display = 'none';
+            isRunning = true;
+          });
+
+        } catch (err) {
+          console.error('Boot error:', err);
+          statusDot.className = 'dot error';
+          statusText.textContent = 'Boot Error';
+          loadingDesc.textContent = 'Error: ' + err.message;
+        }
+      }
+
+      // Button listeners
+      saveBtn.addEventListener('click', async () => {
+        if (!emulator) return;
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+        try {
+          const buf = await emulator.save_state();
+          await saveStateToIDB(buf);
+          showToast();
+        } catch (e) {
+          console.error('Save state failed:', e);
+          alert('Failed to save state: ' + e.message);
+        } finally {
+          saveBtn.disabled = false;
+          saveBtn.textContent = '💾 Save State';
+        }
+      });
+
+      resetBtn.addEventListener('click', async () => {
+        if (confirm('Clear saved state and perform a clean cold boot?')) {
+          await clearIDB();
+          window.location.reload();
+        }
+      });
+
+      pauseBtn.addEventListener('click', () => {
+        if (!emulator) return;
+        if (isRunning) {
+          emulator.stop();
+          isRunning = false;
+          statusDot.className = 'dot paused';
+          statusText.textContent = 'Paused';
+          pauseBtn.textContent = '▶ Resume';
+        } else {
+          emulator.run();
+          isRunning = true;
+          statusDot.className = 'dot running';
+          statusText.textContent = 'Running (KolibriOS)';
+          pauseBtn.textContent = '⏸ Pause';
+        }
+      });
+
+      mouseLockBtn.addEventListener('click', () => {
+        const canvas = document.querySelector('#screen_container canvas');
+        if (canvas && canvas.requestPointerLock) {
+          canvas.requestPointerLock();
+        }
+      });
+
+      document.addEventListener('pointerlockchange', () => {
+        const locked = document.pointerLockElement !== null;
+        mouseChip.style.display = locked ? 'none' : 'block';
+      });
+
+      fullscreenBtn.addEventListener('click', () => {
+        if (!document.fullscreenElement) {
+          emulatorCard.requestFullscreen().catch(err => {
+            alert('Error attempting to enable fullscreen: ' + err.message);
+          });
+        } else {
+          document.exitFullscreen();
+        }
+      });
+
+      document.addEventListener('fullscreenchange', () => {
+        if (document.fullscreenElement) {
+          emulatorCard.classList.add('fullscreen');
+          fullscreenBtn.textContent = '⛶ Exit Fullscreen';
+          mouseChip.style.display = 'block';
+        } else {
+          emulatorCard.classList.remove('fullscreen');
+          fullscreenBtn.textContent = '⛶ Fullscreen';
+          mouseChip.style.display = 'none';
+        }
+      });
+
+      // Start on load
+      window.addEventListener('DOMContentLoaded', boot);
+    })();
+  </script>
+</body>
+</html>
