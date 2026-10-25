@@ -232,12 +232,20 @@ export default function App() {
         setBootSource(isoUrl === '/kolibri.img' ? 'iso_livecd' : 'custom_url');
       }
 
+      const baseUrl = import.meta.env.BASE_URL || './';
+      const resolveUrl = (u: string) => {
+        if (!u) return baseUrl;
+        if (u.startsWith('http://') || u.startsWith('https://') || u.startsWith('blob:')) return u;
+        const clean = u.startsWith('/') ? u.slice(1) : u;
+        return baseUrl.endsWith('/') ? baseUrl + clean : baseUrl + '/' + clean;
+      };
+
       // Preload binaries into memory ArrayBuffers to guarantee instant zero-range-abort startup
       const [wasmRes, biosRes, vgaBiosRes, mediaRes] = await Promise.all([
-        fetch('/v86.wasm'),
-        fetch('/seabios.bin'),
-        fetch('/vgabios.bin'),
-        fetch(isoUrl),
+        fetch(resolveUrl('v86.wasm')),
+        fetch(resolveUrl('seabios.bin')),
+        fetch(resolveUrl('vgabios.bin')),
+        fetch(resolveUrl(isoUrl)),
       ]);
 
       if (!wasmRes.ok || !biosRes.ok || !vgaBiosRes.ok || !mediaRes.ok) {
@@ -260,7 +268,7 @@ export default function App() {
           const { instance } = await WebAssembly.instantiate(wasmBuf, param);
           return instance.exports;
         },
-        wasm_path: '/v86.wasm',
+        wasm_path: resolveUrl('v86.wasm'),
         memory_size: 64 * 1024 * 1024, // 64MB RAM
         vga_memory_size: 8 * 1024 * 1024,
         screen_container: containerRef.current,

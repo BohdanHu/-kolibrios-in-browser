@@ -9,8 +9,8 @@
     <meta property="og:description" content="Run KolibriOS in your browser with v86 WebAssembly x86 emulator, featuring persistent IndexedDB virtual disk storage, manual state saving, and cold boot controls." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
-    <!-- v86 x86-to-WebAssembly emulator (relative path for GitHub Pages compatibility) -->
-    <script src="./libv86.js"></script>
+    <!-- v86 x86-to-WebAssembly emulator using Vite %BASE_URL% interpolation for dev & production compatibility -->
+    <script src="%BASE_URL%libv86.js"></script>
     <script>
       // Ensure both V86 and V86Starter constructor aliases are defined
       if (typeof window !== "undefined") {
@@ -24,6 +24,6 @@
   </head>
   <body class="bg-zinc-950 text-zinc-100 min-h-screen antialiased select-none">
     <div id="root"></div>
-    <script type="module" src="./src/main.tsx"></script>
+    <script type="module" src="%BASE_URL%src/main.tsx"></script>
   </body>
 </html>
