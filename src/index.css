@@ -22,11 +22,13 @@
 }
 
 .scale-1x canvas {
-  transform: scale(1);
+  width: auto;
+  height: auto;
 }
 
 .scale-150 canvas {
-  transform: scale(1.25);
+  width: 125%;
+  height: auto;
 }
 
 /* Custom animations */

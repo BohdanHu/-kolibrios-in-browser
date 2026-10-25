@@ -206,14 +206,22 @@ export default function App() {
       if (restoreFromSaved) {
         setStatus('restoring_state');
         setStatusMessage('Loading saved state and virtual hard drive from IndexedDB...');
-        const record = await loadSessionFromIndexedDB();
-        if (record && record.state) {
-          savedBuffer = record.state;
-          setBootSource('restored_state');
-          setSavedSizeBytes(record.sizeBytes);
-          setLastSavedTime(record.timestamp);
-        } else {
-          console.warn('Saved session not found in IndexedDB, falling back to clean boot.');
+        try {
+          const record = await loadSessionFromIndexedDB();
+          if (record && record.state) {
+            savedBuffer = record.state;
+            setBootSource('restored_state');
+            setSavedSizeBytes(record.sizeBytes);
+            setLastSavedTime(record.timestamp);
+          } else {
+            console.warn('Saved session not found in IndexedDB, falling back to clean boot.');
+            restoreFromSaved = false;
+          }
+        } catch (dbErr) {
+          console.warn('Failed to load session from IndexedDB, clearing and falling back to clean boot:', dbErr);
+          try {
+            await clearIndexedDBStorage();
+          } catch {}
           restoreFromSaved = false;
         }
       }
@@ -801,8 +809,14 @@ export default function App() {
               isFullscreen ? 'flex-1' : 'min-h-[380px] sm:min-h-[480px] max-h-[720px]'
             }`}
             onClick={() => {
-              if (status === 'running' && !isMouseLocked) {
-                handleLockMouse();
+              if (emulatorRef.current) {
+                try {
+                  emulatorRef.current.run();
+                  setStatus('running');
+                  setStatusMessage('KolibriOS is running');
+                } catch (e) {
+                  console.warn('Resume error:', e);
+                }
               }
             }}
           >
